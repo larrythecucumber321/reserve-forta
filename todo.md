@@ -1,0 +1,3 @@
+- Make stale price use RToken names
+- Add all RTokens for everything
+- Do all the specs
