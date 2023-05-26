@@ -6,33 +6,13 @@ import {
   ethers,
   getEthersProvider,
 } from "forta-agent";
-const BigNumber = ethers.BigNumber;
+import { getDeployers, getRTokenContracts } from "./agent.utils";
 
 // ABIs for Reserve contracts
-const deployerRegistryAbi = [
-  "event DeploymentRegistered(string version, address deployer)",
-];
-const erc20Abi = [
-  "function name() external view returns (string)",
-  "function totalSupply() external view returns (uint256)",
-];
-const deployerAbi = [
-  "event RTokenCreated(address indexed main, address indexed rToken, address stRSR, address indexed owner, string version)",
-];
-
-const mainAbi = ["function assetRegistry() external view returns (address)"];
 const assetRegistryAbi = [
   "function erc20s() external view returns (address[] memory)",
   "function toAsset(address) external view returns (address)",
 ];
-
-// Deployer registry
-const deployerRegistryAddress = "0xD85Fac03804a3e44D29c494f3761D11A2262cBBe";
-const deployerRegistry = new ethers.Contract(
-  deployerRegistryAddress,
-  deployerRegistryAbi,
-  getEthersProvider()
-);
 
 // Threshold for alert (24 hours)
 const hours = 6;
@@ -42,47 +22,20 @@ const refreshThreshold = hours * 60 * 60; // hours in seconds
 function provideHandleBlock() {
   return async function handleBlock(this: any, blockEvent: BlockEvent) {
     const findings: Finding[] = [];
-    const outdatedRTokens: string[] = [];
+    const outdatedRTokens: { address: string; name: string }[] = [];
 
-    const registerEvents = await deployerRegistry.queryFilter(
-      deployerRegistry.filters.DeploymentRegistered()
-    );
-    const deployers = registerEvents.map((e) => e?.args?.deployer);
+    const deployers = await getDeployers();
 
     await Promise.all(
       deployers.map(async (deployerAddress) => {
-        const deployer = new ethers.Contract(
-          deployerAddress,
-          deployerAbi,
-          getEthersProvider()
-        );
-        const deploymentEvents = await deployer.queryFilter(
-          deployer.filters.RTokenCreated()
-        );
-
-        const rTokens = deploymentEvents.map(
-          (deployment) => deployment?.args?.rToken
-        );
-        const mains = deploymentEvents.map(
-          (deployment) => deployment?.args?.main
-        );
+        const rTokens = await getRTokenContracts(deployerAddress);
 
         await Promise.all(
-          rTokens.map(async (rToken, i) => {
-            const rTokenContract = new ethers.Contract(
-              rToken,
-              erc20Abi,
-              getEthersProvider()
-            );
-
-            const rTokenSupply = await rTokenContract.totalSupply();
+          rTokens.map(async ({ rToken, main }, i) => {
+            const rTokenSupply = await rToken.totalSupply();
+            const rTokenName = await rToken.name();
             if (rTokenSupply.lt(ethers.utils.parseEther("100"))) return;
-            const mainAddress = mains[i];
-            const main = new ethers.Contract(
-              mainAddress,
-              mainAbi,
-              getEthersProvider()
-            );
+
             const assetRegistryAddress = await main.assetRegistry();
 
             const assetRegistryContract = new ethers.Contract(
@@ -114,7 +67,10 @@ function provideHandleBlock() {
 
                 // Check if it's been more than threshold hours since the last update
                 if (blockEvent.block.timestamp - +lastSave > refreshThreshold) {
-                  outdatedRTokens.push(rToken);
+                  outdatedRTokens.push({
+                    address: rToken.address,
+                    name: rTokenName,
+                  });
                 }
                 break;
               } catch (e) {
@@ -130,14 +86,17 @@ function provideHandleBlock() {
       findings.push(
         Finding.fromObject({
           name: "Asset Update Monitor",
-          description: `The following RTokens have not been updated in the last ${hours} hours: ${outdatedRTokens.join(
-            ", "
-          )}`,
+          description: `The following RTokens have not been updated in the last ${hours} hours: ${outdatedRTokens
+            .map((x) => x.name)
+            .join(", ")}`,
           alertId: "RESERVE-STALE-PRICE",
           severity: FindingSeverity.Medium,
           type: FindingType.Info,
           metadata: {
-            outdatedRTokens: outdatedRTokens.join(", "),
+            outdatedRTokenAddresses: outdatedRTokens
+              .map((x) => x.address)
+              .join(", "),
+            outdatedRTokenNames: outdatedRTokens.map((x) => x.name).join(", "),
             currentBlock: blockEvent.blockNumber.toString(),
           },
         })
