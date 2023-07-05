@@ -52,7 +52,7 @@ function provideHandleBlock() {
       findings.push(
         Finding.fromObject({
           name: "Collateralization Monitor",
-          description: `The RToken contract at address ${rTokenAddress} is undercollateralized`,
+          description: `The RToken at address ${rTokenAddress} is undercollateralized`,
           alertId: "RESERVE-UNDERCOLLATERALIZED",
           severity: FindingSeverity.High,
           type: FindingType.Suspicious,

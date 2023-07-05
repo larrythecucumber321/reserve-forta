@@ -15,7 +15,7 @@ const assetRegistryAbi = [
 ];
 
 // Threshold for alert (24 hours)
-const hours = 6;
+const hours = 24;
 const refreshThreshold = hours * 60 * 60; // hours in seconds
 
 // Handle block
@@ -107,7 +107,7 @@ function provideHandleBlock() {
   };
 }
 
-module.exports = {
+export default {
   provideHandleBlock,
   handleBlock: provideHandleBlock(),
 };
